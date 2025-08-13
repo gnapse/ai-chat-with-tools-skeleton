@@ -1,4 +1,4 @@
-import { Message } from "@ai-sdk/react";
+import { UIMessage } from "@ai-sdk/react";
 import { WeatherToolMessage } from "../tools/weather.ui";
 import { LocationToolMessage } from "../tools/location.ui";
 import { ConfirmationToolMessage } from "../tools/confirmation.ui";
@@ -66,7 +66,7 @@ function ToolInvocation({
 }
 
 interface MessagePartProps {
-    part: NonNullable<Message["parts"]>[number];
+    part: NonNullable<UIMessage["parts"]>[number];
     onConfirm?: (result: string) => void;
 }
 
@@ -75,41 +75,56 @@ function MessagePartComponent({ part, onConfirm }: MessagePartProps) {
         case "text":
             return <div>{part.text}</div>;
 
-        case "tool-invocation":
-            if (part.toolInvocation.state === "partial-call") {
-                return <div>Tool call in progress...</div>;
-            }
-            return (
-                <ToolInvocation
-                    onConfirm={onConfirm}
-                    {...part.toolInvocation}
-                />
-            );
+        case "step-start":
+            return <div className="text-sm text-gray-500 italic">Starting step...</div>;
 
         case "reasoning":
-            return <div>{part.reasoning}</div>;
+            const reasoningPart = part as unknown as { text?: string };
+            return <div className="text-sm text-gray-600 bg-gray-100 p-2 rounded italic">Reasoning: {reasoningPart.text || 'Processing...'}</div>;
 
         case "file":
-            return <div>File: {part.mimeType}</div>;
-
-        case "source":
-            return (
-                <div>
-                    {part.source.sourceType} source:{" "}
-                    <a href={part.source.url} target="_blank" rel="noreferrer">
-                        {part.source.title ?? part.source.url}
-                    </a>
-                </div>
-            );
+            return <div className="text-sm bg-blue-100 p-2 rounded">📎 File attachment</div>;
 
         default:
-            // @ts-expect-error we want to show unknown part types just in case
-            return <div>Unknown part: {part.type}</div>;
+            // Handle tool parts dynamically
+            if (part.type.startsWith("tool-")) {
+                const toolName = part.type.replace("tool-", "");
+                const toolPart = part as { 
+                    type: string; 
+                    toolCallId: string; 
+                    state: string; 
+                    input?: unknown; 
+                    output?: string; 
+                };
+                
+                if (toolPart.state === "input-streaming" || toolPart.state === "input-complete") {
+                    return <div>Tool call in progress...</div>;
+                }
+                
+                return (
+                    <ToolInvocation
+                        onConfirm={onConfirm}
+                        toolCallId={toolPart.toolCallId}
+                        toolName={toolName}
+                        state={toolPart.state === "output-complete" ? "result" : "call"}
+                        args={(toolPart.input as Record<string, unknown>) || {}}
+                        result={toolPart.output}
+                    />
+                );
+            }
+            
+            // Handle data parts
+            if (part.type.startsWith("data-")) {
+                const dataPart = part as { data: unknown };
+                return <div className="text-sm bg-yellow-100 p-2 rounded">📊 Data: {JSON.stringify(dataPart.data)}</div>;
+            }
+            
+            return <div className="text-sm text-red-500">Unknown part: {part.type}</div>;
     }
 }
 
 interface MessageProps {
-    message: Message;
+    message: UIMessage;
     onConfirm?: ({
         toolCallId,
         result,
@@ -125,17 +140,19 @@ export function MessageComponent({ message, onConfirm }: MessageProps) {
             <strong className="text-sm font-semibold">{`${message.role}: `}</strong>
             <div className="space-y-2">
                 {message.parts?.map((part, index) => {
-                    const key =
-                        part.type === "tool-invocation"
-                            ? part.toolInvocation.toolCallId
-                            : part.type;
+                    const toolPart = part as { 
+                        type: string; 
+                        toolCallId?: string; 
+                    };
+                    const key = part.type.startsWith("tool-") 
+                        ? toolPart.toolCallId || `${part.type}-${index}`
+                        : part.type;
 
                     const handleConfirm =
-                        onConfirm && part.type === "tool-invocation"
+                        onConfirm && part.type.startsWith("tool-") && toolPart.toolCallId
                             ? (result: string) =>
                                   onConfirm({
-                                      toolCallId:
-                                          part.toolInvocation.toolCallId,
+                                      toolCallId: toolPart.toolCallId!,
                                       result,
                                   })
                             : undefined;

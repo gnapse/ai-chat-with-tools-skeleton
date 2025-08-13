@@ -1,11 +1,11 @@
-import { Tool } from "ai";
+import { tool } from "ai";
 import { z } from "zod";
 
-const confirmationTool: Tool = {
+const confirmationTool = tool({
     description: "Ask the user for confirmation.",
-    parameters: z.object({
+    inputSchema: z.object({
         message: z.string().describe("The message to ask for confirmation."),
     }),
-};
+});
 
 export { confirmationTool };
